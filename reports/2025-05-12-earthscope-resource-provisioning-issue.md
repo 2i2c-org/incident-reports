@@ -134,3 +134,6 @@ Engineers agree to not update the current configuration further given everything
 
 - [ ] write an incident report
 - [ ] hold an internal retrospective about the incident to learn from it https://github.com/2i2c-org/meta/issues/2194
+  - https://github.com/2i2c-org/meta/issues/2217
+  - https://github.com/2i2c-org/infrastructure/issues/6105
+  - https://github.com/2i2c-org/infrastructure/issues/6106 
