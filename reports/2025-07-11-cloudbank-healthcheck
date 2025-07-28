@@ -15,7 +15,7 @@ Most of the hubs weren't in active use across 50ish community colleges. While th
 Collaboration with community technical contact & bumpy but ultimately prompt resolution of the issue.
 
 ## What Didn't Go So Well?
-We had one engineer working. both to triage and resolve the issue that started in her late afternoon. Other engineers were out or at a conference in PDT time zone - they were able to offer remote guidance, but the staffing gap delayed our progress.
+We had one engineer working, both to triage and resolve the issue that started in her late afternoon. Other engineers were out or at a conference in PDT time zone - they were able to offer remote guidance, but the staffing gap delayed our progress.
 
 
 
@@ -31,54 +31,54 @@ PR that triggered the alerts reverted: https://github.com/2i2c-org/infrastructur
 CloudBank health check fail plus GroupExporter pod restarts
 
 1:06 PM
-• Sean updates the `jupyterhub.singleuser.image` config in the `common.values.yaml` for CloudBank
-• Jenny notices a bunch of gha-failures, logs into a cloudbank hub to check everything is okay and succeeds
-• Jenny notices PagerDuty alerts for health-check failures come in
-• Jenny tries to log into other hubs and met with `Service unavailable`
-• Jenny decides to revert the PR and communicates this to Sean
+• Hub admin updates the `jupyterhub.singleuser.image` config in the `common.values.yaml` for CloudBank
+• Engineer notices a bunch of gha-failures, logs into a cloudbank hub to check everything is okay and succeeds
+• Engineer notices PagerDuty alerts for health-check failures come in
+• Engineer tries to log into other hubs and met with `Service unavailable`
+• Engineer decides to revert the PR and communicates this to hub admin
 • PR revert did not solve the root cause of the problem
 • Hubs remain inaccessible with `Service unavailable`
 
 1:27 PM
-Yuvi enters the chat, at a conference without a laptop, suspects the hub pods are dead
+Tech Lead enters the chat, at a conference without a laptop, suspects the hub pods are dead
 
 1:29 PM
-Jenny attempts hub pod restarts
+Engineer attempts hub pod restarts
 
 1:35 PM
-Yuvi's hypothesis is that all the hub pods restarting maxes out something on the core nodes
+Tech Lead's hypothesis is that all the hub pods restarting maxes out something on the core nodes
 
 1:36 PM
-To test, Jenny deletes one of the hub pods now to see if it comes back
+To test, engineer deletes one of the hub pods now to see if it comes back
 
 1:38 PM
 It does
 
 1:38 PM
-Jenny does the same for the other hubs in the cluster, with gaps between
+Engineer does the same for the other hubs in the cluster, with time gaps in between
 
 1:42 PM
-Yuvi notes we still need to acrually fix it
+Tech Lead notes we still need to actually fix the underlying cause
 
 2:35 PM
-Jenny notes "am a fair way through restarting hub pods and they are not having the intended effect"
+Engineer notes "am a fair way through restarting hub pods and they are not having the intended effect"
 Tries logging into various Cloudbank hubs but still met with `Service unavailable.`
 
-Jenny hands off to Angus and Yuvi with a note:
+Engineer hands off to Tech Lead with a note:
 P.S I think the hub pod is fine, it could be the proxy pod
 
 3:34 PM
-Yuvi runs `k get pod -A | grep -v Running | choose 0 | sort | uniq | x
+Tech Lead runs `k get pod -A | grep -v Running | choose 0 | sort | uniq | x
 
 4:06 PM
-Yuvi believes that https://github.com/2i2c-org/infrastructure/pull/6352 fixed it, and re-deploys the original PR
+Tech Lead believes that https://github.com/2i2c-org/infrastructure/pull/6352 fixed it, and re-deploys the original PR
 
 4:22 PM
-Incident resolved and communicated to Sean Morris
+Incident resolved and communicated to hub admin
 
 July 14, 2025
 11:20 AM
-Jenny finishes resolving the overall incident in PagerDuty by restarting all the groups-exporter pods (see private pagerduty channel) and will write a https://github.com/2i2c-org/infrastructure/issues/6358 for the https://team-compass.2i2c.org/projects/managed-hubs/incidents/#create-an-incident-report
+Engineer finishes resolving the overall incident in PagerDuty by restarting all the groups-exporter pods (see private pagerduty channel) and opens https://github.com/2i2c-org/infrastructure/issues/6358 for the https://team-compass.2i2c.org/projects/managed-hubs/incidents/#create-an-incident-report
 
 
 ## Action Items
