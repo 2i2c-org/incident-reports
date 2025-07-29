@@ -62,7 +62,7 @@ FreshDesk indicates Openscapes has deleted a bunch of data from the shared folde
 
 11:24 AM
 Angus investigates what JupyterHub is doing at startup that takes so long. It looks like the problem in the above query is the LEFT OUTER JOIN which comes from the joinedload(orm.User._orm_spawners) . This is performed to ensure that the field is loaded, which avoids later lazy DB lookups. In our case, we already have a JOIN on this field, and there is a one-to-many relationship between users and spawners, so this LEFT OUTER JOIN produces O(N) results for the O(N) JOIN. This means the query result scales O(N^2)!
-As such, I believe that if we encounter this situation again,  we can't effectively chase it down with more RAM because it's nonlinear.
+As such, Angus believes that if we encounter this situation again,  we can't effectively chase it down with more RAM because it's nonlinear.
 
 PR here, if it ends up being the right fix: https://github.com/jupyterhub/jupyterhub/pull/5109 (edited) 
 
