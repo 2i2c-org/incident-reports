@@ -1,0 +1,75 @@
+# Incident report July 21 2025 - Openscapes hub pods dying post-stress-testing
+ 
+ 
+## Summary
+ 
+On July 21, 2025, we received a support request from Openscapes asking for confirmation that their hub would be resilient throughout a large, 700 attendee, workshop session the next day. 
+That evening Yuvi completed a stress test, adding thousands of named servers to the database. Early the following morning, alerts fire when the Openscapes workshop hub fails a health check, with hub pod showing OOMKilled status. 
+
+## Resolution
+
+We all theorised that the hub pod dying was related to the stress testing Yuvi did the day before
+Angus noted that the hub database was only 1.6 MB, so we didn't think the issues came from the database being too big
+
+We still thought that the hub database may be corrupted somehow, so we decided to create a backup of the database and try and restart the hub pod without a database
+Restarting the hub without a database worked. We left that in place for the workshop hub, since there is no need for persistent user state in this use case
+
+An [upstream contribution](https://github.com/jupyterhub/jupyterhub/pull/5109) to JupyterHub was made to address inefficient O(N^2) database table join operations.
+## Timeline
+
+_All times in EDT_
+
+## July 22
+1:03
+First alert fires
+
+5:00
+Engineers acknowledge the alert
+
+5:05
+Incident declared. 
+Georgiana notes after deleting the hub deployment and re-deploying the hub pod shows OOMKilled status
+
+5:10 AM
+Team checks Grafana and and the hub DB 
+
+5:20 AM
+Georgiana increases the hub memory limit 
+then see if we can see what's eating up the memory
+
+5:41
+Team starts a live call, successfully restarts the hub
+
+7:42
+Angus assesses the DB, with the following results
+Logs indicated we didn't get past init_spawners
+init_spwners performs a fairly complex operation: https://github.com/jupyterhub/jupyterhub/blob/de7ee551d736b48be1cd047334288a6811c450eb/jupyterhub/app.py#L3092-L3102
+I ran this locally on the downloaded DB, and the process was CPU bound for 96s, consuming >6GiB of RAM peak.
+The DB had 736 servers and 1746 spawners.
+~ https://gist.github.com/agoose77/2dd8d7a6c9b72daabb39885797eb5b8e
+I think this is probably the cause of our crash; the init logic consumes too much RAM (more than even Georgiana's 3GB increased limit), and is killed by the supervisor. (edited) 
+
+7:51 
+Georgiana and Jenny discuss maximizing hub pod memory limits to avoid issues during workshop
+
+8:37
+Georgiana opens https://github.com/2i2c-org/infrastructure/pull/6431 that increases memory and cpu requests and limits.
+
+10:23 AM
+Jenny monitors CloudWatch metrics and notices a spike in EBS write ops
+
+10:27
+FreshDesk indicates Openscapes has deleted a bunch of data from the shared folder
+
+11:24 AM
+Angus investigates what JupyterHub is doing at startup that takes so long. It looks like the problem in the above query is the LEFT OUTER JOIN which comes from the joinedload(orm.User._orm_spawners) . This is performed to ensure that the field is loaded, which avoids later lazy DB lookups. In our case, we already have a JOIN on this field, and there is a one-to-many relationship between users and spawners, so this LEFT OUTER JOIN produces O(N) results for the O(N) JOIN. This means the query result scales O(N^2)!
+As such, Angus believes that if we encounter this situation again,  we can't effectively chase it down with more RAM because it's nonlinear.
+
+PR here, if it ends up being the right fix: https://github.com/jupyterhub/jupyterhub/pull/5109 (edited) 
+
+July 23 4:10 AM
+Jenny confirms peak of 235 participants at 18:00 UTC yesterday, a few OOM kills here and there, but hub pod did not restart
+Incident officially resolved!
+
+## Action Items
+- [ ] write an incident report
