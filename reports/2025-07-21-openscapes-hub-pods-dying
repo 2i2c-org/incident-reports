@@ -72,5 +72,3 @@ Incident officially resolved!
 
 ## Action Items
 - [ ] write an incident report
-- [ ] @Angus Hollands (he/him) will examine the hub db backup to see if there's anything we can learn
-- [ ] @Georgiana will ensure the home directory disk size is sufficient with xfs and consider increasing the hub pod memory limit to 3GiB if there is no competition for resources on the core node
