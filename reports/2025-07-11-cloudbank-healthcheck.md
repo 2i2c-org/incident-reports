@@ -82,5 +82,6 @@ Engineer finishes resolving the overall incident in PagerDuty by restarting all 
 ## Action Items
 
 - [ ] Write an incident report
+- [ ] https://github.com/2i2c-org/infrastructure/issues/6477
 
 
