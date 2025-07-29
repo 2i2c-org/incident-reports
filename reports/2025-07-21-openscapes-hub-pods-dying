@@ -14,6 +14,7 @@ Angus noted that the hub database was only 1.6 MB, so we didn't think the issues
 We still thought that the hub database may be corrupted somehow, so we decided to create a backup of the database and try and restart the hub pod without a database
 Restarting the hub without a database worked. We left that in place for the workshop hub, since there is no need for persistent user state in this use case
 
+An [upstream contribution](https://github.com/jupyterhub/jupyterhub/pull/5109) to JupyterHub was made to address inefficient O(N^2) database table join operations.
 ## Timeline
 
 _All times in EDT_
