@@ -70,7 +70,7 @@ Incident resolved.
 ## Follow-up timeline (times in BST)
 
 ### 8:16 PM
-Sarika de Bruyn reports that some userse are having trouble with logging in, or are experiencing kernel disconnections.
+Sarika de Bruyn reports that some users are having trouble with logging in, or are experiencing kernel disconnections.
 
 ### 8:20 PM
 Primary engineer acknowledges report.
