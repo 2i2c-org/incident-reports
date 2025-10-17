@@ -1,0 +1,21 @@
+version: 1
+
+project:
+  title: 2i2c Incident Reports
+  toc:
+    - file: index.md
+    - title: Incident reports
+      children:
+        - pattern: report/*.md
+
+site:
+  title: 2i2c Incident Reports
+  template: book-theme
+  options:
+    hide_toc: true
+    logo_text: 2i2c Incident Reports
+  nav:
+    - title: Infrastructure Repository
+      url: https://github.com/2i2c-org/infrastructure
+    - title: 2i2c Blog
+      url: https://2i2c.org/blog/
