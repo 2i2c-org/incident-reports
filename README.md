@@ -40,6 +40,11 @@ nox -s docs-live
 3. **MyST builds** Markdown → HTML website
 4. **GitHub Pages** hosts the site
 
+## Who is responsible for this repository
+
+- The Product and Services team is responsible for the content in the incident reports, and for adding new ones to this repository.
+- The Marketing team is responsible for the code and infrastructure that generates a MyST site from these PDFs.
+
 ---
 
 Built with [MyST](https://mystmd.org) • Maintained by [2i2c](https://2i2c.org)
