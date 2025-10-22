@@ -18,6 +18,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      BASE_URL: "https://2i2c.org"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
