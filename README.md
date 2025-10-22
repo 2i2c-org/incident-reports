@@ -1,52 +1,45 @@
 # 2i2c Incident Reports
 
-Incident reports for 2i2c managed services, published as a [MyST website](https://mystmd.org).
+**Public incident reports for 2i2c managed cloud infrastructure.**
 
-The site is automatically built and deployed to GitHub Pages when changes are pushed to `main`.
+We believe in transparency. This site documents incidents, their resolutions, and what we learned.
 
-## Quick Start
+🔗 **View the site:** https://2i2c-org.github.io/incident-reports/
+
+## Why This Exists
+
+- **Transparency**: Share what goes wrong and how we fix it
+- **Learning**: Document lessons learned from each incident
+- **Accountability**: Public record of our service reliability
+- **Knowledge sharing**: Help others learn from our experiences
+
+## Add a Report
+
+
+1. Export PDF from PagerDuty
+2. Add to reports/ folder
+3. Commit and push
+
+GitHub Actions automatically converts the PDF and deploys the updated site.
+
+## Local Development
 
 ```bash
-# Build and view the site locally
+# Install dependencies
+pip install -r requirements.txt
+cd doc && myst build --html
+
+# OR, do it with one command
 nox -s docs-live
 ```
 
-## Adding New Reports
-
-1. Export incident postmortem from PagerDuty as PDF
-2. Add PDF to `reports/` folder
-3. Commit and push to `main`
-
-GitHub Actions will automatically convert the PDF and deploy the updated site!
-
 ## How It Works
 
-- `reports/` - Store PDF exports or markdown files here
-- `scripts/convert_reports.py` - Converts PDFs -> Markdown
-- `doc/report/` - Generated MyST markdown files (not checked into git)
-- `noxfile.py` - Builds the MyST website
+1. **PDFs go in** `reports/` folder
+2. **Script converts** PDFs → Markdown (extracts sections, timelines, metadata)
+3. **MyST builds** Markdown → HTML website
+4. **GitHub Pages** hosts the site
 
-The conversion script:
-- Parses PDF text and extracts sections
-- Generates clean markdown with MyST frontmatter
-- Handles both PDFs and markdown files
-- Creates a summary table of all reports
+---
 
-## Setup GitHub Pages
-
-First-time setup (do once):
-
-1. Go to repository Settings → Pages
-2. Set Source to "GitHub Actions"
-3. Push a change to `main` branch
-4. Site will be live at `https://2i2c-org.github.io/incident-reports/`
-
-## Manual Usage
-
-```bash
-# Convert reports to markdown
-python scripts/convert_reports.py
-
-# Build the site
-cd doc && myst build --html
-```
+Built with [MyST](https://mystmd.org) • Maintained by [2i2c](https://2i2c.org)
