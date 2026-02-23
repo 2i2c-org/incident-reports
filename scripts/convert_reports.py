@@ -53,12 +53,60 @@ def clean_pdf_text(text: str) -> str:
 # ============================================================================
 
 
+def clean_title(title: str) -> str:
+    """Strip 'Incident report [date] -' or 'Postmortem Report -' prefix from title."""
+    cleaned = re.sub(
+        r"^(Incident\s+report\s+\w+\s+\d{1,2}\s+\d{4}\s*-\s*|Postmortem\s+Report\s*-\s*)",
+        "",
+        title,
+        flags=re.IGNORECASE
+    )
+    return cleaned.strip()
+
+
 def extract_title(text: str) -> str:
-    """Extract incident title from PDF text."""
+    """Extract incident title from PDF text.
+
+    Handles multiple PDF formats:
+    1. PagerDuty exports with header: Takes lines after "Postmortem Report" line
+    2. Multi-line titles: Joins consecutive lines before "Status:"
+    3. Single-line titles: Takes the line before "Status:"
+    4. No "Status:" field: Falls back to first non-URL line
+
+    Returns:
+        Extracted title, or "Untitled Incident" if extraction fails
+    """
+    # Find the text before "Status:"
     match = re.search(r"^(.*?)\s*Status:", text, re.DOTALL)
     if match:
-        # Clean up whitespace and join multi-line titles
-        return " ".join(match.group(1).split())
+        before_status = match.group(1).strip()
+        lines = [line.strip() for line in before_status.split('\n') if line.strip()]
+
+        if not lines:
+            return "Untitled Incident"
+
+        # If there's a PagerDuty export header (contains URL), skip it
+        if len(lines) > 1 and ('PagerDuty' in lines[0] or 'http' in lines[0]):
+            title_lines = lines[1:]
+        else:
+            title_lines = lines
+
+        # Join remaining lines into a single title
+        # (handles multi-line titles like earthscope)
+        title = " ".join(title_lines)
+        # Clean up extra whitespace
+        title = " ".join(title.split())
+        # Remove metadata prefixes
+        return clean_title(title)
+
+    # Fallback: No "Status:" field found
+    # (e.g., earthscope-provisioning-deeper-dive.pdf)
+    # Take first non-empty, non-URL line
+    for line in text.split('\n'):
+        line = line.strip()
+        if line and not line.startswith('http'):
+            return clean_title(line)
+
     return "Untitled Incident"
 
 
@@ -292,7 +340,7 @@ def ensure_frontmatter(content: str, filename: str) -> str:
     # Try to extract title from first heading
     title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     if title_match:
-        title = title_match.group(1).strip()
+        title = clean_title(title_match.group(1).strip())
     else:
         # Generate title from filename
         title = filename.replace("-", " ").title()
