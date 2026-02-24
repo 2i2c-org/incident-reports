@@ -2,7 +2,7 @@
 
 **Public incident reports for 2i2c managed cloud infrastructure.**
 
-We believe in transparency. This site documents incidents, their resolutions, and what we learned.
+This site documents 2i2c's engineering team incidents, their resolutions, and what we learned.
 
 🔗 **View the site:** https://2i2c-org.github.io/incident-reports/
 
@@ -15,36 +15,30 @@ We believe in transparency. This site documents incidents, their resolutions, an
 
 ## Add a Report
 
-
 1. Export PDF from PagerDuty
-2. Add to reports/ folder
+2. Add to `reports/` folder
 3. Commit and push
 
-GitHub Actions automatically converts the PDF and deploys the updated site.
+GitHub Actions automatically converts the PDF and deploys the updated site using [docling](https://github.com/docling-project/docling)
 
 ## Local Development
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-cd doc && myst build --html
-
-# OR, do it with one command
 nox -s docs-live
 ```
 
 ## How It Works
 
-1. **PDFs go in** `reports/` folder
-2. **Script converts** PDFs → Markdown (extracts sections, timelines, metadata)
-3. **MyST builds** Markdown → HTML website
-4. **GitHub Pages** hosts the site
+This repository roughly follows a 3-step process:
+
+- Parse PDFs in `reports/`
+- Convert them to markdown using [docling](https://github.com/docling-project/docling)
+- Parse the markdown for metadata with hacky regexes (e.g. "duration")
+- Output MyST markdown to be parsed by the MyST site in `docs/`
+
+GitHub Actions automates all of the above any time we change the repository.
 
 ## Who is responsible for this repository
 
-- The Product and Services team is responsible for the content in the incident reports, and for adding new ones to this repository.
+- The Product and Services team is responsible for the content in `reports/`, and for adding new ones to this repository.
 - The Marketing team is responsible for the code and infrastructure that generates a MyST site from these PDFs.
-
----
-
-Built with [MyST](https://mystmd.org) • Maintained by [2i2c](https://2i2c.org)

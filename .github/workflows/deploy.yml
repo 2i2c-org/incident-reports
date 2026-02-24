@@ -24,14 +24,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install nox
-        run: pip install nox
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
 
       - name: Cache docling ML models
         uses: actions/cache@v4
@@ -48,7 +42,7 @@ jobs:
           restore-keys: docling-output-
 
       - name: Build site with nox
-        run: nox -s docs
+        run: uvx nox -s docs
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
