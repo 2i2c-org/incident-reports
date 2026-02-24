@@ -21,27 +21,102 @@ from pathlib import Path
 import pdfplumber
 import yaml
 
+# PDF column detection thresholds
+GAP_THRESHOLD = 30  # Minimum gap width (in points) to consider a column divider
 
 # ============================================================================
 # PDF EXTRACTION
 # ============================================================================
 
 
+def _detect_column_boundary(page) -> float | None:
+    """Detect the x-coordinate that separates left and right columns.
+
+    Finds the first significant vertical gap in the left half of the page.
+    This identifies the boundary between main content and right-side metadata.
+
+    Args:
+        page: pdfplumber page object
+
+    Returns:
+        X-coordinate of column boundary, or None if detection fails
+    """
+    words = page.extract_words()
+    if len(words) < 10:
+        return None
+
+    # Focus on the left 70% of the page (where column boundary typically is)
+    page_width = page.width
+    left_boundary = page_width * 0.7
+
+    # Get x1 positions in this region
+    x_positions = sorted([word["x1"] for word in words if word["x1"] < left_boundary])
+
+    if len(x_positions) < 5:
+        return None
+
+    # Find first significant gap (> GAP_THRESHOLD points)
+    # This should be the gutter between left column and right metadata
+    for i in range(len(x_positions) - 1):
+        gap = x_positions[i + 1] - x_positions[i]
+        if gap > GAP_THRESHOLD:
+            return x_positions[i]
+
+    return None
+
+
+def _extract_left_column(page, boundary: float) -> str:
+    """Extract text from left column using boundary.
+
+    Args:
+        page: pdfplumber page object
+        boundary: X-coordinate separating columns
+
+    Returns:
+        Text from left column
+    """
+    bbox = (0, 0, boundary, page.height)
+    return page.crop(bbox).extract_text()
+
+
 def extract_text_from_pdf(pdf_path: Path) -> str:
-    """Extract all text from a PDF file."""
+    """Extract text from a PDF file, handling two-column layouts.
+
+    PagerDuty PDFs use a two-column layout (main content left, metadata right).
+    We detect the actual column boundary dynamically by finding the largest gap
+    in x-coordinates, then extract only text from the left column.
+
+    Args:
+        pdf_path: Path to PDF file
+
+    Returns:
+        Extracted text from the main content (left column)
+    """
     text = ""
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            text += page.extract_text() + "\n"
+            # Try layout-aware extraction first
+            page_text = page.extract_text(layout=True)
+
+            # If we still have column mixing, use gap detection
+            if page_text:
+                boundary = _detect_column_boundary(page)
+                if boundary:
+                    page_text = _extract_left_column(page, boundary)
+
+            # Fallback to default extraction
+            if not page_text:
+                page_text = page.extract_text()
+
+            text += page_text + "\n"
     return text
 
 
 def clean_pdf_text(text: str) -> str:
-    """Remove PDF layout artifacts from extracted text."""
-    # Remove two-column layout keywords
-    text = re.sub(r"OWNER OF REVIEW PROCESS\s*", "\n", text)
-    text = re.sub(r"IMPACT TIME\s*", "\n", text)
-    text = re.sub(r"DURATION\s*", "\n", text)
+    """Remove PDF layout artifacts from extracted text.
+
+    Removes timezone footer that appears at the end of PagerDuty exports.
+    """
     # Remove timezone footer
     pattern = r"\*All times listed.*?Pacific Time.*?\)"
     text = re.sub(pattern, "", text, flags=re.DOTALL)
@@ -59,7 +134,7 @@ def clean_title(title: str) -> str:
         r"^(Incident\s+report\s+\w+\s+\d{1,2}\s+\d{4}\s*-\s*|Postmortem\s+Report\s*-\s*)",
         "",
         title,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
     return cleaned.strip()
 
@@ -67,26 +142,21 @@ def clean_title(title: str) -> str:
 def extract_title(text: str) -> str:
     """Extract incident title from PDF text.
 
-    Handles multiple PDF formats:
-    1. PagerDuty exports with header: Takes lines after "Postmortem Report" line
-    2. Multi-line titles: Joins consecutive lines before "Status:"
-    3. Single-line titles: Takes the line before "Status:"
-    4. No "Status:" field: Falls back to first non-URL line
-
-    Returns:
-        Extracted title, or "Untitled Incident" if extraction fails
+    Returns text before "Status:" field, handling multi-line titles
+    and PagerDuty export headers. Falls back to first non-URL line
+    if no "Status:" field is found.
     """
     # Find the text before "Status:"
     match = re.search(r"^(.*?)\s*Status:", text, re.DOTALL)
     if match:
         before_status = match.group(1).strip()
-        lines = [line.strip() for line in before_status.split('\n') if line.strip()]
+        lines = [line.strip() for line in before_status.split("\n") if line.strip()]
 
         if not lines:
             return "Untitled Incident"
 
         # If there's a PagerDuty export header (contains URL), skip it
-        if len(lines) > 1 and ('PagerDuty' in lines[0] or 'http' in lines[0]):
+        if len(lines) > 1 and ("PagerDuty" in lines[0] or "http" in lines[0]):
             title_lines = lines[1:]
         else:
             title_lines = lines
@@ -99,12 +169,10 @@ def extract_title(text: str) -> str:
         # Remove metadata prefixes
         return clean_title(title)
 
-    # Fallback: No "Status:" field found
-    # (e.g., earthscope-provisioning-deeper-dive.pdf)
-    # Take first non-empty, non-URL line
-    for line in text.split('\n'):
+    # Fallback: Take first non-empty, non-URL line
+    for line in text.split("\n"):
         line = line.strip()
-        if line and not line.startswith('http'):
+        if line and not line.startswith("http"):
             return clean_title(line)
 
     return "Untitled Incident"
@@ -132,16 +200,9 @@ def extract_duration(text: str) -> str:
 
 
 def extract_section(text: str, section_name: str, next_sections: list) -> str:
-    """
-    Extract a section from PDF text.
+    """Extract a section from PDF text.
 
-    Args:
-        text: The full PDF text
-        section_name: Name of section to extract (e.g., "Overview")
-        next_sections: List of section names that might follow this one
-
-    Returns:
-        Section content as string, or empty string if not found
+    Returns content between section_name and the next section in next_sections.
     """
     # Build regex pattern to match section until next section
     next_pattern = "|".join(re.escape(s) for s in next_sections)
@@ -163,11 +224,7 @@ def extract_section(text: str, section_name: str, next_sections: list) -> str:
 
 
 def extract_timeline(text: str) -> str:
-    """
-    Extract and format timeline from PDF text.
-
-    Returns timeline as markdown with tables for each date.
-    """
+    """Extract and format timeline from PDF text as markdown tables."""
     match = re.search(r"Timeline\s*\n(.*)", text, re.DOTALL)
     if not match:
         return ""
@@ -225,12 +282,7 @@ def extract_timeline(text: str) -> str:
 
 
 def parse_pdf_incident(pdf_path: Path) -> dict:
-    """
-    Parse a PagerDuty incident PDF and extract all sections.
-
-    Returns dict with keys: title, impact_time, duration, overview,
-    what_happened, resolution, etc.
-    """
+    """Parse a PagerDuty incident PDF and extract all sections."""
     # Step 1: Extract and clean text
     text = extract_text_from_pdf(pdf_path)
     text = clean_pdf_text(text)
