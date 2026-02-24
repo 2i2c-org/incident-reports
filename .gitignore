@@ -130,4 +130,4 @@ dmypy.json
 
 # MyST build outputs
 _build
-doc/report
+docs/report

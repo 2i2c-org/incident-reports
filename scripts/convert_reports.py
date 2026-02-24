@@ -7,9 +7,9 @@ This script:
 3. Converts to markdown with MyST frontmatter
 4. Generates a summary table of all reports
 
-There is a bunch of regex in here! That's because we're parsing PDF.
-Ideally we can use the PagerDuty API to get the text from incidents directly,
-but there seems to be missing information that we only have via the PDF exports.
+Uses docling (IBM Research) for ML-based PDF layout analysis, which handles
+PagerDuty's two-column layout natively. Light regex post-processing extracts
+metadata and sections from docling's markdown output.
 
 Usage:
     python scripts/convert_reports.py
@@ -18,114 +18,59 @@ Usage:
 import re
 from pathlib import Path
 
-import pdfplumber
 import yaml
-
-# PDF column detection thresholds
-GAP_THRESHOLD = 30  # Minimum gap width (in points) to consider a column divider
-
-# ============================================================================
-# PDF EXTRACTION
-# ============================================================================
-
-
-def _detect_column_boundary(page) -> float | None:
-    """Detect the x-coordinate that separates left and right columns.
-
-    Finds the first significant vertical gap in the left half of the page.
-    This identifies the boundary between main content and right-side metadata.
-
-    Args:
-        page: pdfplumber page object
-
-    Returns:
-        X-coordinate of column boundary, or None if detection fails
-    """
-    words = page.extract_words()
-    if len(words) < 10:
-        return None
-
-    # Focus on the left 70% of the page (where column boundary typically is)
-    page_width = page.width
-    left_boundary = page_width * 0.7
-
-    # Get x1 positions in this region
-    x_positions = sorted([word["x1"] for word in words if word["x1"] < left_boundary])
-
-    if len(x_positions) < 5:
-        return None
-
-    # Find first significant gap (> GAP_THRESHOLD points)
-    # This should be the gutter between left column and right metadata
-    for i in range(len(x_positions) - 1):
-        gap = x_positions[i + 1] - x_positions[i]
-        if gap > GAP_THRESHOLD:
-            return x_positions[i]
-
-    return None
-
-
-def _extract_left_column(page, boundary: float) -> str:
-    """Extract text from left column using boundary.
-
-    Args:
-        page: pdfplumber page object
-        boundary: X-coordinate separating columns
-
-    Returns:
-        Text from left column
-    """
-    bbox = (0, 0, boundary, page.height)
-    return page.crop(bbox).extract_text()
-
-
-def extract_text_from_pdf(pdf_path: Path) -> str:
-    """Extract text from a PDF file, handling two-column layouts.
-
-    PagerDuty PDFs use a two-column layout (main content left, metadata right).
-    We detect the actual column boundary dynamically by finding the largest gap
-    in x-coordinates, then extract only text from the left column.
-
-    Args:
-        pdf_path: Path to PDF file
-
-    Returns:
-        Extracted text from the main content (left column)
-    """
-    text = ""
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            # Try layout-aware extraction first
-            page_text = page.extract_text(layout=True)
-
-            # If we still have column mixing, use gap detection
-            if page_text:
-                boundary = _detect_column_boundary(page)
-                if boundary:
-                    page_text = _extract_left_column(page, boundary)
-
-            # Fallback to default extraction
-            if not page_text:
-                page_text = page.extract_text()
-
-            text += page_text + "\n"
-    return text
+from docling.document_converter import DocumentConverter
 
 
 def clean_pdf_text(text: str) -> str:
-    """Remove PDF layout artifacts from extracted text.
+    """Clean docling markdown output for section parsing.
 
-    Removes timezone footer that appears at the end of PagerDuty exports.
+    - Fixes URL word-breaks (docling sometimes inserts spaces in long URLs)
+    - Strips markdown heading markers so section names match as plain text
+    - Removes timezone footer from PagerDuty exports
+    - Removes right-column metadata sections (values extracted beforehand)
+    - Normalizes "- Timeline" list items to "Timeline" section headers
+    - Inserts "Timeline" header when docling omits it
     """
-    # Remove timezone footer
-    pattern = r"\*All times listed.*?Pacific Time.*?\)"
-    text = re.sub(pattern, "", text, flags=re.DOTALL)
+    # Pass 1: space immediately after "://" → "https:// github.com/"
+    text = re.sub(r"(https?://)\s+", r"\1", text)
+    # Pass 2: space within a URL path (repeat for chained breaks).
+    # Only joins when the continuation contains "/" so we don't merge prose words.
+    for _ in range(3):
+        text = re.sub(
+            r"(https?://\S+?/)\s+([a-z0-9][a-z0-9\-_./]*)",
+            lambda m: m.group(1) + m.group(2) if "/" in m.group(2) else m.group(0),
+            text,
+        )
+
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\*All times listed[^\n]*", "", text)
+
+    # Remove right-column metadata sections (values already extracted before cleaning)
+    # Handles "OWNER OF REVIEW PROCESS" and concatenated "OWNEROFREVIEWPROCESS"
+    text = re.sub(
+        r"OWNER\s*OF?\s*REVIEW\s*PROCESS\s*\n.*?\n", "", text, flags=re.IGNORECASE
+    )
+    # Handles "IMPACT TIME" and truncated "IMPACT TIM" (some PDFs cut the column)
+    text = re.sub(r"IMPACT\s*TIM\w*\s*\n.*?\n", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"DURATION\s*\n.*?\n", "", text, flags=re.IGNORECASE)
+
+    text = re.sub(r"^-\s+Timeline\s*$", "Timeline", text, flags=re.MULTILINE)
+
+    # If no "Timeline" header exists but time entries follow Action Items,
+    # insert one so extract_section("Action Items") stops at the right place.
+    # Detects markdown tables (|), plain entries (10:02 AM), and list items
+    # (- 10:02 AM) since docling uses all three formats.
+    if "Timeline" not in text:
+        text = re.sub(
+            r"(Action Items\s*\n.*?)(\n\||\n\d{1,2}:\d{2}\s*[AP]M|\n-\s+\d{1,2}:\d{2}\s*[AP]M)",
+            r"\1\nTimeline\2",
+            text,
+            count=1,
+            flags=re.DOTALL,
+        )
+
     return text
-
-
-# ============================================================================
-# METADATA EXTRACTION
-# ============================================================================
 
 
 def clean_title(title: str) -> str:
@@ -145,8 +90,9 @@ def extract_title(text: str) -> str:
     Returns text before "Status:" field, handling multi-line titles
     and PagerDuty export headers. Falls back to first non-URL line
     if no "Status:" field is found.
+
+    Expects clean text (heading markers already stripped by clean_pdf_text).
     """
-    # Find the text before "Status:"
     match = re.search(r"^(.*?)\s*Status:", text, re.DOTALL)
     if match:
         before_status = match.group(1).strip()
@@ -155,21 +101,17 @@ def extract_title(text: str) -> str:
         if not lines:
             return "Untitled Incident"
 
-        # If there's a PagerDuty export header (contains URL), skip it
+        # Skip PagerDuty export header line if present
         if len(lines) > 1 and ("PagerDuty" in lines[0] or "http" in lines[0]):
             title_lines = lines[1:]
         else:
             title_lines = lines
 
-        # Join remaining lines into a single title
-        # (handles multi-line titles like earthscope)
         title = " ".join(title_lines)
-        # Clean up extra whitespace
         title = " ".join(title.split())
-        # Remove metadata prefixes
         return clean_title(title)
 
-    # Fallback: Take first non-empty, non-URL line
+    # Fallback: first non-empty, non-URL line
     for line in text.split("\n"):
         line = line.strip()
         if line and not line.startswith("http"):
@@ -179,7 +121,20 @@ def extract_title(text: str) -> str:
 
 
 def extract_impact_time(text: str) -> str:
-    """Extract impact time range from PDF text."""
+    """Extract impact time range from raw docling text (before clean_pdf_text).
+
+    Docling extracts right-column metadata as sections:
+        IMPACT TIME
+        Feb 11 at 08:46 to Feb 11 at 22:44
+    """
+    # Handles "IMPACT TIME" and truncated "IMPACT TIM" (some PDFs cut the column)
+    match = re.search(r"IMPACT\s*TIM\w*\s*\n\s*(.+?)$", text, re.MULTILINE | re.IGNORECASE)
+    if match:
+        value = match.group(1).strip()
+        if " at " in value and " to " in value:
+            return value
+
+    # Fallback: inline time range anywhere in text
     pattern = (
         r"([A-Z][a-z]{2}\s+\d{1,2}\s+at\s+\d{1,2}:\d{2}\s+"
         r"to\s+[A-Z][a-z]{2}\s+\d{1,2}\s+at\s+\d{1,2}:\d{2})"
@@ -189,14 +144,19 @@ def extract_impact_time(text: str) -> str:
 
 
 def extract_duration(text: str) -> str:
-    """Extract incident duration from PDF text."""
-    match = re.search(r"(\d+[mh]\s+\d+[ms])", text)
+    """Extract incident duration from raw docling text (before clean_pdf_text).
+
+    Docling extracts right-column metadata as sections:
+        DURATION
+        13h 58m
+    """
+    match = re.search(r"DURATION\s*\n\s*(.+?)$", text, re.MULTILINE | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+
+    # Fallback: match duration patterns like "13h 58m", "4d 1h 30m", "17m 6s"
+    match = re.search(r"(\d+[dhm]\s+\d+[hms](?:\s+\d+[ms])?)", text)
     return match.group(1) if match else "Unknown"
-
-
-# ============================================================================
-# SECTION EXTRACTION
-# ============================================================================
 
 
 def extract_section(text: str, section_name: str, next_sections: list) -> str:
@@ -204,7 +164,6 @@ def extract_section(text: str, section_name: str, next_sections: list) -> str:
 
     Returns content between section_name and the next section in next_sections.
     """
-    # Build regex pattern to match section until next section
     next_pattern = "|".join(re.escape(s) for s in next_sections)
     pattern = rf"{re.escape(section_name)}\s*\n" rf"(.*?)(?=\n(?:{next_pattern})|\Z)"
 
@@ -213,87 +172,100 @@ def extract_section(text: str, section_name: str, next_sections: list) -> str:
         return ""
 
     content = match.group(1).strip()
-    # Remove PagerDuty placeholder text
     content = content.replace("No comments added", "").strip()
     return content
 
 
-# ============================================================================
-# TIMELINE EXTRACTION
-# ============================================================================
-
-
 def extract_timeline(text: str) -> str:
-    """Extract and format timeline from PDF text as markdown tables."""
+    """Extract and format timeline from PDF text as markdown tables.
+
+    Handles three formats produced by docling:
+    - Markdown tables: | 10:28AM | event |
+    - Plain time entries: 10:28 AM Some event
+    - List items: - 10:28 AM Some event
+
+    Groups entries under date sub-headings when present.
+    """
     match = re.search(r"Timeline\s*\n(.*)", text, re.DOTALL)
     if not match:
         return ""
 
     lines = match.group(1).strip().split("\n")
-    timeline = ""
+
     current_date = None
-    entries = []
+    sections = []  # list of (date_or_None, [row_strings])
+    rows = []
 
     for line in lines:
         line = line.strip()
-
-        # Skip empty lines and incident numbers
         if not line or line.startswith("INCIDENT #"):
             continue
 
-        # Check if this is a date header (e.g., "October 16, 2025")
-        is_date = re.match(r"^[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}$", line)
-        if is_date:
-            # Write out previous date's table if it exists
-            if current_date and entries:
-                timeline += (
-                    f"\n### {current_date}\n\n" f"| Time | Event |\n| --- | --- |\n"
-                )
-                timeline += "\n".join(entries) + "\n"
-                entries = []
+        # Date sub-heading (e.g. "October 16, 2025")
+        if re.match(r"^[A-Z][a-z]{2,8}\s+\d{1,2},?\s+\d{4}$", line):
+            if rows:
+                sections.append((current_date, rows[:]))
+                rows = []
             current_date = line
             continue
 
-        # Check if this is a time entry (e.g., "3:00 PM Some event")
-        time_match = re.match(r"^(\d{1,2}:\d{2}\s*[AP]M)\s+(.*)", line)
-        if time_match:
-            time = time_match.group(1)
-            event = time_match.group(2)
-            entries.append(f"| {time} | {event} |")
+        # Markdown table separator — skip
+        if re.match(r"^\|[-\s|]+\|$", line):
             continue
 
-        # Otherwise, it's a continuation of the previous entry
-        skip_words = ("Triggered", "Resolved")
-        if entries and not line.startswith(skip_words):
-            # Append to last entry
-            entries[-1] = entries[-1].rstrip(" |") + " " + line + " |"
+        # Markdown table row: | 10:28AM | event |
+        m = re.match(r"\|\s*(\d{1,2}:\d{2}\s*[AP]M)\s*\|\s*(.*?)\s*\|$", line)
+        if m:
+            rows.append(f"| {m.group(1)} | {m.group(2).strip()} |")
+            continue
 
-    # Write final date's table
-    if current_date and entries:
-        timeline += f"\n### {current_date}\n\n" f"| Time | Event |\n| --- | --- |\n"
-        timeline += "\n".join(entries)
+        # Plain time entry: 10:28 AM Some event
+        m = re.match(r"^(\d{1,2}:\d{2}\s*[AP]M)\s+(.*)", line)
+        if m:
+            rows.append(f"| {m.group(1)} | {m.group(2)} |")
+            continue
 
-    return timeline
+        # List item: - 10:28 AM Some event
+        m = re.match(r"^-\s+(\d{1,2}:\d{2}\s*[AP]M)\s+(.*)", line)
+        if m:
+            rows.append(f"| {m.group(1)} | {m.group(2)} |")
+            continue
 
+        # Continuation of previous entry (skip PagerDuty system lines)
+        skip_starts = ("Triggered", "Resolved", "INCIDENT")
+        if rows and not any(line.startswith(w) for w in skip_starts):
+            rows[-1] = rows[-1].rstrip(" |") + " " + line + " |"
 
-# ============================================================================
-# PDF PARSING
-# ============================================================================
+    if rows:
+        sections.append((current_date, rows))
+
+    if not sections:
+        return ""
+
+    output = []
+    for date, date_rows in sections:
+        if date:
+            output.append(f"\n### {date}\n")
+        output.append("| Time | Event |")
+        output.append("| --- | --- |")
+        output.extend(date_rows)
+
+    return "\n".join(output)
 
 
 def parse_pdf_incident(pdf_path: Path) -> dict:
     """Parse a PagerDuty incident PDF and extract all sections."""
-    # Step 1: Extract and clean text
-    text = extract_text_from_pdf(pdf_path)
-    text = clean_pdf_text(text)
+    converter = DocumentConverter()
+    text_raw = converter.convert(str(pdf_path)).document.export_to_markdown()
 
-    # Step 2: Extract metadata
+    # Extract metadata from raw text BEFORE cleaning (clean_pdf_text removes these sections)
+    impact_time = extract_impact_time(text_raw)
+    duration = extract_duration(text_raw)
+
+    text = clean_pdf_text(text_raw)
     title = extract_title(text)
-    impact_time = extract_impact_time(text)
-    duration = extract_duration(text)
 
-    # Step 3: Extract content sections
-    sections = {
+    return {
         "title": title,
         "impact_time": impact_time,
         "duration": duration,
@@ -323,17 +295,9 @@ def parse_pdf_incident(pdf_path: Path) -> dict:
         "timeline": extract_timeline(text),
     }
 
-    return sections
-
-
-# ============================================================================
-# MARKDOWN GENERATION
-# ============================================================================
-
 
 def to_markdown(data: dict, date: str) -> str:
     """Convert parsed incident data to MyST markdown format."""
-    # Start with frontmatter and title
     lines = [
         "---",
         f'title: "{data["title"]}"',
@@ -349,7 +313,6 @@ def to_markdown(data: dict, date: str) -> str:
         "",
     ]
 
-    # Add each section if it has content
     sections = [
         ("Overview", data.get("overview")),
         ("What Happened", data.get("what_happened")),
@@ -363,10 +326,8 @@ def to_markdown(data: dict, date: str) -> str:
 
     for section_title, content in sections:
         if content:
-            # Remove checkboxes from action items
             if section_title == "Action Items":
                 content = re.sub(r"- \[[ x]\] ", "- ", content)
-
             lines.append(f"## {section_title}")
             lines.append("")
             lines.append(content)
@@ -377,52 +338,32 @@ def to_markdown(data: dict, date: str) -> str:
 
 def ensure_frontmatter(content: str, filename: str) -> str:
     """Add MyST frontmatter to markdown file if missing."""
-    # Remove checkboxes (convert to regular bullets)
     content = re.sub(r"- \[[ x]\] ", "- ", content)
 
-    # If already has frontmatter, we're done
     if content.strip().startswith("---"):
         return content
 
-    # Extract date from filename (format: YYYY-MM-DD-title.md)
     date = "Unknown"
     if re.match(r"\d{4}-\d{2}-\d{2}", filename):
         date = filename[:10]
 
-    # Try to extract title from first heading
     title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
     if title_match:
         title = clean_title(title_match.group(1).strip())
     else:
-        # Generate title from filename
         title = filename.replace("-", " ").title()
 
-    # Add frontmatter
-    frontmatter = [
-        "---",
-        f'title: "{title}"',
-        f"date: {date}",
-        "---",
-        "",
-    ]
-
+    frontmatter = ["---", f'title: "{title}"', f"date: {date}", "---", ""]
     return "\n".join(frontmatter) + content
-
-
-# ============================================================================
-# REPORT TABLE GENERATION
-# ============================================================================
 
 
 def generate_report_table(report_dir: Path) -> str:
     """Generate summary table of all reports for the index page."""
     rows = ["| Date | Report | Duration |", "| --- | --- | --- |"]
 
-    # Process each markdown file, newest first
     for md_file in sorted(report_dir.glob("*.md"), reverse=True):
         content = md_file.read_text()
 
-        # Extract frontmatter using YAML
         title = md_file.stem
         date = md_file.stem[:10]
 
@@ -436,113 +377,70 @@ def generate_report_table(report_dir: Path) -> str:
                 except Exception:
                     pass
 
-        # Extract duration from content
         duration_match = re.search(r"\|\s*\*\*Duration\*\*\s*\|\s*(.+?)\s*\|", content)
-        duration = "Unknown"
-        if duration_match:
-            duration = duration_match.group(1).strip()
+        duration = duration_match.group(1).strip() if duration_match else "Unknown"
 
-        # Add row to table
         link = f"[{title}](./report/{md_file.stem})"
         rows.append(f"| {date} | {link} | {duration} |")
 
     return "\n".join(rows) + "\n"
 
 
-# ============================================================================
-# MAIN PROCESSING
-# ============================================================================
+def process_pdf(pdf_path: Path, output_dir: Path, cache_dir: Path) -> None:
+    """Process a single PDF file.
 
+    Converted markdown is cached in cache_dir so docling only runs when the
+    cached file is absent. Delete cache_dir to force a full re-conversion.
+    """
+    cache_path = cache_dir / f"{pdf_path.stem}.md"
+    output_path = output_dir / f"{pdf_path.stem}.md"
 
-def process_pdf(pdf_path: Path, output_dir: Path) -> bool:
-    """Process a single PDF file. Returns True on success."""
+    if cache_path.exists():
+        print(f"Processing: {pdf_path.name} (cached)")
+        output_path.write_text(cache_path.read_text())
+        return
+
     print(f"Processing: {pdf_path.name}")
-    try:
-        # Parse PDF
-        data = parse_pdf_incident(pdf_path)
-
-        # Extract date from filename
-        date = "Unknown"
-        if re.match(r"\d{4}-\d{2}-\d{2}", pdf_path.stem):
-            date = pdf_path.stem[:10]
-
-        # Convert to markdown
-        markdown = to_markdown(data, date)
-
-        # Write output
-        output_path = output_dir / f"{pdf_path.stem}.md"
-        output_path.write_text(markdown)
-
-        print("  ✓ Converted to markdown\n")
-        return True
-
-    except Exception as e:
-        print(f"  ✗ Error: {e}\n")
-        return False
+    date = pdf_path.stem[:10] if re.match(r"\d{4}-\d{2}-\d{2}", pdf_path.stem) else "Unknown"
+    markdown = to_markdown(parse_pdf_incident(pdf_path), date)
+    cache_path.write_text(markdown)
+    output_path.write_text(markdown)
 
 
-def process_markdown(md_path: Path, output_dir: Path) -> bool:
-    """Process a single markdown file. Returns True on success."""
+def process_markdown(md_path: Path, output_dir: Path) -> None:
+    """Process a single markdown file, adding frontmatter if missing."""
     print(f"Processing: {md_path.name}")
-    try:
-        # Read and add frontmatter if needed
-        content = md_path.read_text()
-        content = ensure_frontmatter(content, md_path.stem)
-
-        # Write output
-        output_path = output_dir / md_path.name
-        output_path.write_text(content)
-
-        print("  ✓ Added frontmatter\n")
-        return True
-
-    except Exception as e:
-        print(f"  ✗ Error: {e}\n")
-        return False
+    content = ensure_frontmatter(md_path.read_text(), md_path.stem)
+    (output_dir / md_path.name).write_text(content)
 
 
 def main():
     """Main entry point - process all reports and generate site."""
-    # Setup directories
     reports_dir = Path("reports")
-    output_dir = Path("doc/report")
+    output_dir = Path("docs/report")
+    cache_dir = Path("docs/_build/docling")
     reports_dir.mkdir(exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find input files
     pdf_files = list(reports_dir.glob("*.pdf"))
     md_files = list(reports_dir.glob("*.md"))
-    total = len(pdf_files) + len(md_files)
 
     print(f"Found {len(pdf_files)} PDFs and {len(md_files)} markdown files\n")
 
-    if total == 0:
+    if not pdf_files and not md_files:
         print("No files found. Add PDFs or markdown to reports/ directory.")
         return
 
-    # Process all files
-    success = 0
     for pdf_path in pdf_files:
-        if process_pdf(pdf_path, output_dir):
-            success += 1
+        process_pdf(pdf_path, output_dir, cache_dir)
 
     for md_path in md_files:
-        if process_markdown(md_path, output_dir):
-            success += 1
+        process_markdown(md_path, output_dir)
 
-    # Generate report table
     print("Generating report table...")
-    try:
-        table = generate_report_table(output_dir)
-        (output_dir / "report-table.txt").write_text(table)
-        print("  ✓ Report table created\n")
-    except Exception as e:
-        print(f"  ✗ Error: {e}\n")
-
-    # Print summary
-    print("=" * 60)
-    print(f"Successfully processed {success}/{total} files")
-    print("=" * 60)
+    table = generate_report_table(output_dir)
+    (output_dir / "report-table.txt").write_text(table)
 
 
 if __name__ == "__main__":

@@ -33,13 +33,27 @@ jobs:
       - name: Install nox
         run: pip install nox
 
+      - name: Cache docling ML models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: docling-models-${{ hashFiles('requirements.txt') }}
+          restore-keys: docling-models-
+
+      - name: Cache converted PDF markdown
+        uses: actions/cache@v4
+        with:
+          path: docs/_build/docling
+          key: docling-output-${{ hashFiles('reports/*.pdf', 'requirements.txt') }}
+          restore-keys: docling-output-
+
       - name: Build site with nox
         run: nox -s docs
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'doc/_build/html'
+          path: 'docs/_build/html'
 
   deploy:
     environment:
