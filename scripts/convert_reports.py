@@ -29,6 +29,7 @@ def clean_pdf_text(text: str) -> str:
     - Strips markdown heading markers so section names match as plain text
     - Removes timezone footer from PagerDuty exports
     - Removes right-column metadata sections (values extracted beforehand)
+    - Converts PDF bullet glyphs ("\") to "- " list items
     - Normalizes "- Timeline" list items to "Timeline" section headers
     - Inserts "Timeline" header when docling omits it
     """
@@ -45,6 +46,11 @@ def clean_pdf_text(text: str) -> str:
 
     text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\*All times listed[^\n]*", "", text)
+
+    # PDF bullet glyphs (•) render as "\" in docling output. Convert "\ \n content"
+    # into "- content", and drop any remaining lone "\" lines.
+    text = re.sub(r"^\\\n(.+)", r"- \1", text, flags=re.MULTILINE)
+    text = re.sub(r"^\\$", "", text, flags=re.MULTILINE)
 
     # Remove right-column metadata sections (values already extracted before cleaning)
     # Handles "OWNER OF REVIEW PROCESS" and concatenated "OWNEROFREVIEWPROCESS"

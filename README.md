@@ -38,6 +38,8 @@ This repository roughly follows a 3-step process:
 
 GitHub Actions automates all of the above any time we change the repository.
 
+_**Note**: There is some hacky logic that parses the PDFs and extracts standardized metadata from it. I did my best to figure out the proper regexes, but this is likely brittle and will break if we change the format of our incident reports...it'll probably miss some stuff too_.
+
 ## Who is responsible for this repository
 
 - The Product and Services team is responsible for the content in `reports/`, and for adding new ones to this repository.
