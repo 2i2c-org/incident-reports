@@ -1,0 +1,79 @@
+name: New Incident Report
+description: A new incident report
+body:
+- type: textarea
+  id: summary
+  attributes:
+    label: Summary
+    description: |
+      Describe what happened
+
+    value: |
+      As a...
+
+
+      | | Time |
+      | - | - |
+      | Reported to us | |
+      | Acknowledged by us | |
+      | Reported manually | yes / no |
+      | Incident resolved | |
+
+- type: textarea
+  id: what-happened
+  attributes:
+    label: What Happened
+    description: |
+      A description of what happened
+
+
+- type: textarea
+  id: what-went-well
+  attributes:
+    label: What went well?
+    description: |
+      A list of items that went well during the incident & incident reponse
+
+    value: |
+      -
+
+- type: textarea
+  id: what-went-poorly
+  attributes:
+    label: What didn't go well?
+    description: |
+      A list of items that did not go well during the incident & incident reponse
+
+    value: |
+      -
+
+- type: textarea
+  id: where-we-got-lucky
+  attributes:
+    label: Where we got lucky
+    description: |
+      A list of items about where we got lucky in mitigating the incident
+
+    value: |
+      -
+
+- type: textarea
+  id: action-items
+  attributes:
+    label: Action Items
+    description: |
+      A list of incident action items (as issues in the infrastructure/ repo) that mitigates this *class* of incidents
+
+    value: |
+      -
+
+- type: textarea
+  id: timeline
+  attributes:
+    label: Timeline
+    description: |
+      A timeline of events describing the outage
+
+    value: |
+      - [Time] Description of what happened
+      - [Time] Description of what happened
